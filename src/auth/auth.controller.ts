@@ -1,9 +1,10 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards, Request } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { LoginDto } from './dto/login.dto/login.dto';
 import { VerifyEmailDto, VerifyLoginCodeDto } from './dto/verify-email.dto/verify-email.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto/resend-verification.dto';
+import { JwtAuthGuard } from './guards/jwt-auth/jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -27,4 +28,12 @@ export class AuthController {
   @Post('verify-login-code')
   @HttpCode(HttpStatus.OK)
   verifyLoginCode(@Body() dto: VerifyLoginCodeDto) { return this.authService.verifyLoginCode(dto); }
+
+  @Post('meet-saas-token')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async generateMeetSaaSToken(@Request() req) {
+    const user = req.user;
+    return this.authService.generateMeetSaaSToken(BigInt(user.sub), user.role);
+  }
 }

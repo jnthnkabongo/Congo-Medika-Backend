@@ -25,7 +25,7 @@
 //   }
 // }
 import { Injectable, Logger } from '@nestjs/common';
-import { TransactionalEmailsClient } from '@getbrevo/brevo/transactionalEmails';
+import * as nodemailer from 'nodemailer';
 
 export interface EmailMessage {
   to: string;
@@ -41,7 +41,7 @@ export class EmailService {
   private readonly apiKey: string;
   private readonly senderEmail: string;
   private readonly senderName: string;
-  private client: TransactionalEmailsClient | null = null;
+  private transporter: nodemailer.Transporter | null = null;
 
   constructor() {
     this.apiKey = process.env.API_KEY || '';
@@ -49,28 +49,36 @@ export class EmailService {
     this.senderName = "Congo Medika";
 
     if (this.apiKey) {
-      this.client = new TransactionalEmailsClient({ apiKey: this.apiKey });
-      this.logger.log('Brevo email service initialisé (API)');
+      this.transporter = nodemailer.createTransport({
+        host: 'smtp-relay.brevo.com',
+        port: 587,
+        secure: false,
+        auth: {
+          user: process.env.SMTP_USER || 'be357b001@smtp-brevo.com',
+          pass: this.apiKey,
+        },
+      });
+      this.logger.log('Brevo email service initialisé (SMTP)');
     } else {
       this.logger.warn('Brevo API key non configurée - email désactivé');
     }
   }
 
   async sendEmail(message: EmailMessage): Promise<boolean> {
-    if (!this.apiKey || !this.client) {
+    if (!this.apiKey || !this.transporter) {
       this.logger.warn('Brevo non configuré - email ignoré');
       return false;
     }
 
     try {
-      await this.client.sendTransacEmail({
-        to: [{ email: message.to }],
-        subject: message.subject,
-        htmlContent: message.htmlContent,
-        sender: {
+      await this.transporter.sendMail({
+        from: {
           name: this.senderName,
-          email: this.senderEmail || 'djodjokabongo11@gmail.com',
+          address: this.senderEmail || 'djodjokabongo11@gmail.com',
         },
+        to: message.to,
+        subject: message.subject,
+        html: message.htmlContent,
       });
 
       this.logger.log(`Email envoyé à ${message.to}`);
