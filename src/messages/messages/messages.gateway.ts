@@ -99,28 +99,35 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { roomId: string },
   ) {
+    console.log(`joinRoom - User: ${client.user.email} (${client.user.role}), ID: ${client.user.sub}, Room: ${data.roomId}`);
+
     // Vérifier que l'utilisateur a le droit de rejoindre cette room
     const teleconsultation = await this.prisma.teleconsultation.findUnique({
       where: { roomId: data.roomId },
     });
 
     if (!teleconsultation) {
+      console.log('joinRoom - Téléconsultation non trouvée');
       client.emit('error', { message: 'Téléconsultation non trouvée' });
       return;
     }
 
     const userId = BigInt(client.user.sub);
+    console.log(`joinRoom - PatientId: ${teleconsultation.patientId}, DoctorId: ${teleconsultation.doctorId}, UserId: ${userId}`);
+
     const hasAccess =
       (client.user.role === 'patient' && teleconsultation.patientId === userId) ||
       (client.user.role === 'doctor' && teleconsultation.doctorId === userId);
 
     if (!hasAccess) {
+      console.log(`joinRoom - Accès refusé pour ${client.user.role} ${client.user.sub}`);
       client.emit('error', { message: 'Accès non autorisé à cette téléconsultation' });
       return;
     }
 
     client.join(data.roomId);
     client.emit('joinedRoom', { roomId: data.roomId });
+    console.log(`joinRoom - Room ${data.roomId} rejointe avec succès`);
   }
 
   @SubscribeMessage('sendMessage')

@@ -189,51 +189,15 @@ export class MeetSaaSService {
 
       console.log(`Teleconsultation ${teleconsultationId} updated with meetingId: ${meeting.meetingId}`);
 
-      // Générer le token Meet SaaS pour cette réunion
-      try {
-        // Utiliser l'externalRef de l'utilisateur passé en paramètre en priorité
-        const externalRef = userExternalRef || teleconsultation.doctor.externalRef || teleconsultation.patient.externalRef;
+      // Meet SaaS désactivé - on utilise WebRTC direct
+      // Le token Meet SaaS n'est pas nécessaire pour les appels WebRTC
+      console.log('Meet SaaS token generation skipped - using direct WebRTC');
 
-        // Utiliser l'organizationId de l'utilisateur connecté en priorité
-        const organizationId = userOrganizationId || teleconsultation.doctor.organizationId || teleconsultation.patient.organizationId;
-
-        console.log('Token generation parameters:', {
-          userExternalRef,
-          userOrganizationId,
-          doctorExternalRef: teleconsultation.doctor.externalRef,
-          patientExternalRef: teleconsultation.patient.externalRef,
-          selectedExternalRef: externalRef,
-          doctorOrgId: teleconsultation.doctor.organizationId,
-          patientOrgId: teleconsultation.patient.organizationId,
-          selectedOrgId: organizationId,
-        });
-
-        if (organizationId && externalRef) {
-          const meetSaaSToken = await this.generateMeetSaaSToken(meeting.meetingId, organizationId, externalRef);
-          console.log('Meet SaaS token generated for meeting:', meetSaaSToken);
-
-          // Inclure le token et organizationId dans la réponse
-          return {
-            ...meeting,
-            token: meetSaaSToken.token,
-            organizationId: organizationId,
-          };
-        } else {
-          console.warn('No organizationId or externalRef found, skipping token generation');
-          // Retourner quand même le meetingId pour que le frontend puisse l'utiliser
-          return {
-            ...meeting,
-            organizationId: organizationId,
-          };
-        }
-      } catch (error) {
-        console.error('Error generating Meet SaaS token for meeting:', error);
-        // Retourner la réunion avec organizationId même si la génération échoue
-        return {
-          ...meeting,
-          organizationId: userOrganizationId || teleconsultation.doctor.organizationId || teleconsultation.patient.organizationId,
-        };
-      }
+      // Retourner le meeting sans token Meet SaaS
+      return {
+        ...meeting,
+        organizationId: userOrganizationId || teleconsultation.doctor.organizationId || teleconsultation.patient.organizationId,
+      };
     } catch (error) {
       console.error('Error creating meeting for teleconsultation:', error);
       if (error instanceof HttpException) {

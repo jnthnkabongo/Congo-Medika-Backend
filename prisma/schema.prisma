@@ -35,7 +35,7 @@ model Patient {
   dateOfBirth DateTime?      @map("date_of_birth") @db.Date
   gender      PatientGender?
   address     String?        @db.Text
-  avatar      String?        @db.VarChar(500)
+  avatar      String?        @db.Text
   status          PatientStatus  @default(pending)
   externalRef     String?        @map("external_ref") @db.VarChar(255)
   organizationId  String?        @map("organization_id") @db.VarChar(255)
@@ -64,7 +64,7 @@ model Doctor {
   bio             String?      @db.Text
   consultationFee Decimal      @default(0.00) @map("consultation_fee") @db.Decimal(12, 2)
   currency        String       @default("USD") @db.VarChar(3)
-  avatar          String?      @db.VarChar(500)
+  avatar          String?      @db.Text
   status          DoctorStatus @default(pending)
   externalRef     String?      @map("external_ref") @db.VarChar(255)
   organizationId  String?      @map("organization_id") @db.VarChar(255)

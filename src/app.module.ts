@@ -7,9 +7,12 @@ import { PrismaModule } from './prisma/prisma.module';
 import { MessagesModule } from './messages/messages.module';
 import { MeetSaaSModule } from './meet-saas/meet-saas.module';
 import { TeleconsultationsModule } from './teleconsultations/teleconsultations.module';
+import { AppointmentsModule } from './appointments/appointments.module';
+import { WebRTCModule } from './webrtc/webrtc.module';
+import { CallsModule } from './calls/calls.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, MessagesModule, MeetSaaSModule, TeleconsultationsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, MessagesModule, MeetSaaSModule, TeleconsultationsModule, AppointmentsModule, WebRTCModule, CallsModule],
   controllers: [AppController],
   providers: [AppService],
 })

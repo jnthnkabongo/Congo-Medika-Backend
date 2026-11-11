@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards, Request } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Put, UseGuards, Request } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { LoginDto } from './dto/login.dto/login.dto';
@@ -35,5 +35,23 @@ export class AuthController {
   async generateMeetSaaSToken(@Request() req) {
     const user = req.user;
     return this.authService.generateMeetSaaSToken(BigInt(user.sub), user.role);
+  }
+
+  @Get('patients')
+  @UseGuards(JwtAuthGuard)
+  async getPatients(@Request() req) {
+    return this.authService.getPatients();
+  }
+
+  @Get('doctors')
+  @UseGuards(JwtAuthGuard)
+  async getDoctors(@Request() req) {
+    return this.authService.getDoctors();
+  }
+
+  @Put('profile')
+  @UseGuards(JwtAuthGuard)
+  async updateProfile(@Request() req, @Body() dto: any) {
+    return this.authService.updateProfile(req.user, dto);
   }
 }

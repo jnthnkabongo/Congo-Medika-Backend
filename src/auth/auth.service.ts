@@ -76,65 +76,10 @@ export class AuthService {
   }
 
   async generateMeetSaaSToken(userId: bigint, role: Role) {
-    try {
-      const apiKey = this.configService.get<string>('MEET_SAAS_API_KEY');
-      const apiSecret = this.configService.get<string>('MEET_SAAS_API_SECRET');
-
-      if (!apiKey || !apiSecret) {
-        throw new HttpException('Meet SaaS API credentials not configured', HttpStatus.INTERNAL_SERVER_ERROR);
-      }
-
-      // Récupérer l'utilisateur avec son externalRef et organizationId
-      let user: { externalRef: string | null; organizationId: string | null; firstName: string; lastName: string } | null;
-      if (role === 'patient') {
-        const patient = await this.prisma.patient.findUnique({
-          where: { id: userId },
-          select: { externalRef: true, organizationId: true, firstName: true, lastName: true },
-        });
-        user = patient;
-      } else {
-        const doctor = await this.prisma.doctor.findUnique({
-          where: { id: userId },
-          select: { externalRef: true, organizationId: true, firstName: true, lastName: true },
-        });
-        user = doctor;
-      }
-
-      if (!user || !user.externalRef || !user.organizationId) {
-        throw new HttpException('User not found or not linked to Meet SaaS', HttpStatus.NOT_FOUND);
-      }
-
-      const response = await axios.post(
-        // 'https://api.meet-saas.com/api/v1/public/auth/token',
-        'https://stax.verstands.dev/api/v1/public/auth/token',
-        {
-          externalRef: user.externalRef,
-          meetingId: user.organizationId,
-        },
-        {
-          headers: {
-            'x-api-key': apiKey,
-            'x-api-secret': apiSecret,
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-
-      console.log('Meet SaaS token generated:', response.data);
-
-      return {
-        token: response.data.token,
-        userId: response.data.userId,
-        name: response.data.name,
-        expiresIn: response.data.expiresIn,
-      };
-    } catch (error) {
-      console.error('Error generating Meet SaaS token:', error);
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new HttpException('Failed to generate Meet SaaS token', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+    // Meet SaaS désactivé - on utilise WebRTC direct
+    // Le token Meet SaaS n'est pas nécessaire pour les appels WebRTC
+    console.log('Meet SaaS token generation skipped - using direct WebRTC');
+    return null;
   }
 
   private async createChallenge(user: { id: bigint; email: string }, role: Role, purpose: Purpose) {
@@ -324,6 +269,8 @@ export class AuthService {
       console.log('User is not linked to Meet SaaS. Skipping token generation.');
     }
 
+    const isPatient = challenge.userType === 'patient';
+    const patientUser = isPatient ? user as { address?: string | null; gender?: string | null; dateOfBirth?: Date | null } : null;
     return {
       message: 'Connexion réussie.',
       user: {
@@ -332,13 +279,15 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         email: user.email,
+        phone: user.phone,
+        address: patientUser?.address ?? null,
+        gender: patientUser?.gender ?? null,
+        dateOfBirth: patientUser?.dateOfBirth?.toISOString() ?? null,
+        avatar: user.avatar,
         role: challenge.userType,
       },
       ...tokens,
-      meetSaaSToken: meetSaaSToken ? {
-        ...meetSaaSToken,
-        organizationId: user.organizationId,
-      } : null,
+      meetSaaSToken: null, // Meet SaaS désactivé - on utilise WebRTC direct
     };
   }
 
@@ -362,5 +311,112 @@ export class AuthService {
       throw new UnauthorizedException(attempts >= 5 ? 'Nombre maximal de tentatives atteint. Demandez un nouveau code.' : `Code incorrect. Tentative ${attempts}/5.`);
     }
     return challenge;
+  }
+
+  async getPatients() {
+    const patients = await this.prisma.patient.findMany({
+      where: { status: 'active' },
+      select: {
+        id: true,
+        uuid: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        dateOfBirth: true,
+        gender: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return patients.map(patient => ({
+      id: patient.id.toString(),
+      uuid: patient.uuid,
+      firstName: patient.firstName,
+      lastName: patient.lastName,
+      email: patient.email,
+      phone: patient.phone,
+      dateOfBirth: patient.dateOfBirth,
+      gender: patient.gender,
+    }));
+  }
+
+  async getDoctors() {
+    const doctors = await this.prisma.doctor.findMany({
+      where: { status: 'active' },
+      select: {
+        id: true,
+        uuid: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        specialty: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return doctors.map(doctor => ({
+      id: doctor.id.toString(),
+      uuid: doctor.uuid,
+      firstName: doctor.firstName,
+      lastName: doctor.lastName,
+      email: doctor.email,
+      phone: doctor.phone,
+      specialty: doctor.specialty?.name || null,
+      specialtyId: doctor.specialty?.id?.toString() || null,
+    }));
+  }
+
+  async updateProfile(user: any, dto: any) {
+    const userId = BigInt(user.sub);
+    const userRole = user.role;
+
+    const updateData: any = {};
+
+    if (dto.firstName) updateData.firstName = dto.firstName.trim();
+    if (dto.lastName) updateData.lastName = dto.lastName.trim();
+    if (dto.email) updateData.email = dto.email.trim().toLowerCase();
+    if (dto.phone) updateData.phone = dto.phone.trim();
+    if (dto.address) updateData.address = dto.address.trim();
+    if (dto.gender) updateData.gender = dto.gender;
+    if (dto.dateOfBirth) updateData.dateOfBirth = new Date(dto.dateOfBirth);
+    if (dto.password) {
+      updateData.password = await argon2.hash(dto.password);
+    }
+    if (dto.avatar) updateData.avatar = dto.avatar;
+
+    let updatedUser;
+    if (userRole === 'patient') {
+      updatedUser = await this.prisma.patient.update({
+        where: { id: userId },
+        data: updateData,
+      });
+    } else if (userRole === 'doctor') {
+      updatedUser = await this.prisma.doctor.update({
+        where: { id: userId },
+        data: updateData,
+      });
+    } else {
+      throw new Error('Rôle utilisateur non reconnu');
+    }
+
+    return {
+      id: updatedUser.id.toString(),
+      uuid: updatedUser.uuid,
+      firstName: updatedUser.firstName,
+      lastName: updatedUser.lastName,
+      email: updatedUser.email,
+      phone: updatedUser.phone,
+      address: updatedUser.address,
+      gender: updatedUser.gender,
+      dateOfBirth: updatedUser.dateOfBirth?.toISOString(),
+      avatar: updatedUser.avatar,
+    };
   }
 }
