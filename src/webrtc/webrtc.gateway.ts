@@ -10,6 +10,8 @@ import {
 import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
+import { randomUUID } from 'crypto';
 
 interface AuthenticatedSocket extends Socket {
   user?: {
@@ -31,7 +33,10 @@ export class WebRTCGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private connectedUsers = new Map<string, string>(); // userId -> socketId
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
@@ -86,6 +91,9 @@ export class WebRTCGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     console.log(`Call initiated from ${client.user.sub} to ${data.targetUserId}`);
+    this.persistCallInitiated(client.user, data).catch((e) =>
+      console.error('Erreur persistance appel (initiate):', e),
+    );
   }
 
   @SubscribeMessage('acceptCall')
@@ -107,6 +115,9 @@ export class WebRTCGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     console.log(`Call accepted by ${client.user.sub} for caller ${data.callerId}`);
+    this.persistCallAccepted(client.user, data).catch((e) =>
+      console.error('Erreur persistance appel (accept):', e),
+    );
   }
 
   @SubscribeMessage('rejectCall')
@@ -125,6 +136,9 @@ export class WebRTCGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     console.log(`Call rejected by ${client.user.sub} for caller ${data.callerId}`);
+    this.persistCallRejected(client.user, data).catch((e) =>
+      console.error('Erreur persistance appel (reject):', e),
+    );
   }
 
   @SubscribeMessage('callOffer')
@@ -232,5 +246,114 @@ export class WebRTCGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     console.log(`Call ended by ${client.user.sub} for ${data.targetUserId}`);
+    this.persistCallEnded(client.user, data).catch((e) =>
+      console.error('Erreur persistance appel (end):', e),
+    );
+  }
+
+  private async persistCallInitiated(
+    user: { sub: string; role: string },
+    data: {
+      targetUserId: string;
+      targetUserRole: string;
+      teleconsultationId: string;
+      callType: 'audio' | 'video';
+    },
+  ) {
+    const teleconsultation = await this.prisma.teleconsultation.findUnique({
+      where: { id: BigInt(data.teleconsultationId) },
+      select: { id: true, roomId: true },
+    });
+    if (!teleconsultation) {
+      console.warn(
+        `Téléconsultation ${data.teleconsultationId} introuvable, appel non enregistré`,
+      );
+      return;
+    }
+
+    // Éviter les doublons si initiateCall est renvoyé
+    const existing = await this.prisma.call.findFirst({
+      where: {
+        teleconsultationId: teleconsultation.id,
+        callerId: BigInt(user.sub),
+        status: 'calling',
+      },
+    });
+    if (existing) return;
+
+    await this.prisma.call.create({
+      data: {
+        uuid: randomUUID(),
+        teleconsultationId: teleconsultation.id,
+        callerType: user.role as any,
+        callerId: BigInt(user.sub),
+        receiverType: data.targetUserRole as any,
+        receiverId: BigInt(data.targetUserId),
+        type: data.callType,
+        roomId: teleconsultation.roomId,
+        status: 'calling',
+      },
+    });
+    console.log(`Appel ${data.callType} enregistré en base (calling)`);
+  }
+
+  private async persistCallAccepted(
+    user: { sub: string; role: string },
+    data: { callerId: string; teleconsultationId: string },
+  ) {
+    await this.prisma.call.updateMany({
+      where: {
+        teleconsultationId: BigInt(data.teleconsultationId),
+        callerId: BigInt(data.callerId),
+        status: 'calling',
+      },
+      data: { status: 'active', startedAt: new Date() },
+    });
+  }
+
+  private async persistCallRejected(
+    user: { sub: string; role: string },
+    data: { callerId: string; teleconsultationId: string },
+  ) {
+    await this.prisma.call.updateMany({
+      where: {
+        teleconsultationId: BigInt(data.teleconsultationId),
+        callerId: BigInt(data.callerId),
+        status: 'calling',
+      },
+      data: { status: 'rejected', endedAt: new Date() },
+    });
+  }
+
+  private async persistCallEnded(
+    user: { sub: string; role: string },
+    data: { targetUserId: string; teleconsultationId: string },
+  ) {
+    const userId = BigInt(user.sub);
+
+    const call = await this.prisma.call.findFirst({
+      where: {
+        teleconsultationId: BigInt(data.teleconsultationId),
+        status: { in: ['calling', 'active'] },
+        OR: [
+          { callerId: userId },
+          { receiverId: userId },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!call) return;
+
+    // Un appel raccroché avant réponse = manqué
+    const status =
+      call.status === 'calling'
+        ? ('missed' as const)
+        : ('completed' as const);
+
+    await this.prisma.call.update({
+      where: { id: call.id },
+      data: { status, endedAt: new Date() },
+    });
+    console.log(`Appel ${call.type} clôturé en base (${status})`);
   }
 }
