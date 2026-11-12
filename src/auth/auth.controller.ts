@@ -21,6 +21,10 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   resendVerification(@Body() dto: ResendVerificationDto) { return this.authService.resendVerification(dto); }
 
+  @Post('resend-login-code')
+  @HttpCode(HttpStatus.OK)
+  resendLoginCode(@Body() dto: ResendVerificationDto) { return this.authService.resendLoginCode(dto); }
+
   @Post('login')
   @HttpCode(HttpStatus.OK)
   login(@Body() dto: LoginDto) { return this.authService.login(dto); }

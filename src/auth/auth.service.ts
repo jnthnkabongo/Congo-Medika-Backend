@@ -189,31 +189,63 @@ export class AuthService {
 
   async resendVerification(dto: ResendVerificationDto) {
     const email = dto.email.trim().toLowerCase();
-    if (dto.role === RegisterRole.PATIENT) {
-      const user = await this.prisma.patient.findUnique({ where: { email } });
-      if (!user) return { message: 'Si le compte existe et nécessite une vérification, un code sera envoyé.' };
-      if (user.emailVerifiedAt) return { message: 'Cette adresse e-mail est déjà vérifiée.' };
-      return this.createChallenge(user, 'patient', 'EMAIL_VERIFICATION');
+    const roles: Role[] = dto.role
+      ? [dto.role as Role]
+      : ['patient', 'doctor'];
+    for (const role of roles) {
+      const user = role === 'patient'
+        ? await this.prisma.patient.findUnique({ where: { email } })
+        : await this.prisma.doctor.findUnique({ where: { email } });
+      if (!user) continue;
+      if (user.emailVerifiedAt) return { role, message: 'Cette adresse e-mail est déjà vérifiée.' };
+      return { role, ...(await this.createChallenge(user, role, 'EMAIL_VERIFICATION')) };
     }
-    const user = await this.prisma.doctor.findUnique({ where: { email } });
-    if (!user) return { message: 'Si le compte existe et nécessite une vérification, un code sera envoyé.' };
-    if (user.emailVerifiedAt) return { message: 'Cette adresse e-mail est déjà vérifiée.' };
-    return this.createChallenge(user, 'doctor', 'EMAIL_VERIFICATION');
+    return { message: 'Si le compte existe et nécessite une vérification, un code sera envoyé.' };
+  }
+
+  async resendLoginCode(dto: ResendVerificationDto) {
+    const email = dto.email.trim().toLowerCase();
+    // Le rôle est détecté automatiquement via l'email.
+    const patient = await this.prisma.patient.findUnique({ where: { email } });
+    if (patient) {
+      return { role: 'patient', ...(await this.createChallenge(patient, 'patient', 'LOGIN_2FA')) };
+    }
+    const doctor = await this.prisma.doctor.findUnique({ where: { email } });
+    if (doctor) {
+      return { role: 'doctor', ...(await this.createChallenge(doctor, 'doctor', 'LOGIN_2FA')) };
+    }
+    return { message: 'Si le compte existe, un code sera envoyé.' };
   }
 
   async login(dto: LoginDto) {
     const email = dto.email.trim().toLowerCase();
-    const user = dto.role === RegisterRole.PATIENT
-      ? await this.prisma.patient.findUnique({ where: { email } })
-      : await this.prisma.doctor.findUnique({ where: { email } });
-    if (!user || !(await argon2.verify(user.password, dto.password))) {
+    // Le rôle est détecté automatiquement : on cherche le compte dans les
+    // tables patient et médecin, puis on vérifie le mot de passe.
+    const candidates: { user: any; role: Role }[] = [];
+    if (dto.role !== RegisterRole.DOCTOR) {
+      const patient = await this.prisma.patient.findUnique({ where: { email } });
+      if (patient) candidates.push({ user: patient, role: 'patient' });
+    }
+    if (dto.role !== RegisterRole.PATIENT) {
+      const doctor = await this.prisma.doctor.findUnique({ where: { email } });
+      if (doctor) candidates.push({ user: doctor, role: 'doctor' });
+    }
+    let matched: { user: any; role: Role } | null = null;
+    for (const candidate of candidates) {
+      if (await argon2.verify(candidate.user.password, dto.password)) {
+        matched = candidate;
+        break;
+      }
+    }
+    if (!matched) {
       throw new UnauthorizedException('E-mail ou mot de passe incorrect.');
     }
+    const { user, role } = matched;
     if (!user.emailVerifiedAt) throw new UnauthorizedException('Veuillez vérifier votre adresse e-mail avant de vous connecter.');
-    if (dto.role === RegisterRole.PATIENT && user.status !== 'active') {
+    if (role === 'patient' && user.status !== 'active') {
       throw new UnauthorizedException('Ce compte patient n’est pas actif.');
     }
-    if (dto.role === RegisterRole.DOCTOR && user.status !== 'active') {
+    if (role === 'doctor' && user.status !== 'active') {
       throw new UnauthorizedException('Ce compte médecin n’est pas encore activé par l’administration.');
     }
     // await this.emailService.sendEmail({
@@ -236,7 +268,7 @@ export class AuthService {
     //     </div>
     //   `,
     // });
-    return this.createChallenge(user, dto.role, 'LOGIN_2FA');
+    return { role, ...(await this.createChallenge(user, role, 'LOGIN_2FA')) };
   }
 
   async verifyLoginCode(dto: VerifyLoginCodeDto) {
