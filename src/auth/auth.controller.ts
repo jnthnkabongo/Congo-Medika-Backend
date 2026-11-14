@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Put, UseGuards, Request } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Post, Put, UseGuards, Request } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto/register.dto';
 import { LoginDto } from './dto/login.dto/login.dto';
@@ -32,6 +32,15 @@ export class AuthController {
   @Post('verify-login-code')
   @HttpCode(HttpStatus.OK)
   verifyLoginCode(@Body() dto: VerifyLoginCodeDto) { return this.authService.verifyLoginCode(dto); }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  refresh(@Body() body: { refreshToken?: string }) {
+    if (!body?.refreshToken) {
+      throw new BadRequestException('refreshToken est requis.');
+    }
+    return this.authService.refresh(body.refreshToken);
+  }
 
   @Post('meet-saas-token')
   @UseGuards(JwtAuthGuard)

@@ -21,4 +21,10 @@ export class TokenService {
     });
     return { accessToken, refreshToken, tokenType: 'Bearer', expiresIn: this.configService.get<string>('JWT_ACCESS_TTL') || '15m' };
   }
+
+  async verifyRefreshToken(token: string) {
+    return this.jwt.verifyAsync(token, {
+      secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+    });
+  }
 }

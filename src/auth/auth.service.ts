@@ -323,6 +323,33 @@ export class AuthService {
     };
   }
 
+  /// Renouvelle la session à partir du refresh token (30j).
+  /// Vérifie le JWT refresh, recharge l'utilisateur et réémet
+  /// une nouvelle paire access/refresh (rotation).
+  async refresh(refreshToken: string) {
+    let payload: any;
+    try {
+      payload = await this.tokenService.verifyRefreshToken(refreshToken);
+    } catch {
+      throw new UnauthorizedException('Refresh token invalide ou expiré.');
+    }
+
+    const role = payload.role as Role;
+    const userId = BigInt(payload.sub);
+    const user = role === 'patient'
+      ? await this.prisma.patient.findUnique({ where: { id: userId } })
+      : await this.prisma.doctor.findUnique({ where: { id: userId } });
+
+    if (!user || !user.emailVerifiedAt || user.status !== 'active') {
+      throw new UnauthorizedException('Ce compte ne peut pas se connecter.');
+    }
+
+    return this.tokenService.issue(
+      { ...user, externalRef: user.externalRef ?? undefined },
+      role,
+    );
+  }
+
   private async checkCode(challengeId: string, code: string, purpose: Purpose) {
     const challenge = await this.prisma.authCode.findUnique({ where: { challengeId } });
     if (!challenge || challenge.purpose !== purpose || challenge.consumedAt || challenge.expiresAt <= new Date()) {
