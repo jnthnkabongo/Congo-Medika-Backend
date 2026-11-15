@@ -182,6 +182,7 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to(data.roomId).emit('newMessage', {
       id: message.id.toString(),
       uuid: message.uuid,
+      roomId: data.roomId,
       teleconsultationId: teleconsultation.id.toString(),
       senderType: message.senderType,
       senderId: message.senderId.toString(),

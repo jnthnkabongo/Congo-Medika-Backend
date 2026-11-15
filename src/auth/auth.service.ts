@@ -3,7 +3,6 @@ import {
 } from '@nestjs/common';
 import { randomInt, randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
 import * as argon2 from 'argon2';
-import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from './services/email/email.service';
 import { TokenService } from './services/token/token.service';
@@ -29,50 +28,6 @@ export class AuthService {
     const secret = process.env.AUTH_CODE_SECRET;
     if (!secret || secret.length < 32) throw new Error('AUTH_CODE_SECRET doit contenir au moins 32 caractères.');
     return createHmac('sha256', secret).update(`${challengeId}:${code}`).digest('hex');
-  }
-
-  private async createUserOnMeetSaaS(firstName: string, lastName: string, email: string, userId: bigint): Promise<{ externalRef: string; organizationId: string } | null> {
-    try {
-      const apiKey = this.configService.get<string>('MEET_SAAS_API_KEY');
-      const apiSecret = this.configService.get<string>('MEET_SAAS_API_SECRET');
-
-      if (!apiKey || !apiSecret) {
-        console.warn('Meet SaaS API credentials not configured. Skipping user creation on Meet SaaS.');
-        return null;
-      }
-
-      const externalRef = `doctoapp_user_${userId}`;
-
-      const response = await axios.post(
-        // 'https://api.meet-saas.com/api/v1/public/users',
-        'https://stax.verstands.dev/api/v1/public/users',
-        {
-          externalRef: externalRef,
-          name: `${firstName} ${lastName}`,
-          email: email,
-        },
-        {
-          headers: {
-            'x-api-key': apiKey,
-            'x-api-secret': apiSecret,
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-
-      console.log('User created on Meet SaaS:', response.data);
-
-      // Récupérer l'externalRef et l'organizationId depuis la réponse
-      const userData = response.data.user;
-      return {
-        externalRef: userData.externalRef || externalRef,
-        organizationId: userData.organizationId || null,
-      };
-    } catch (error) {
-      console.error('Error creating user on Meet SaaS:', error);
-      // Ne pas bloquer l'inscription si l'appel Meet SaaS échoue
-      return null;
-    }
   }
 
   async generateMeetSaaSToken(userId: bigint, role: Role) {
@@ -145,30 +100,6 @@ export class AuthService {
         // Le statut métier reste pending jusqu'à validation administrative.
       } });
       user = doctor;
-    }
-
-    // Créer l'utilisateur sur Meet SaaS et récupérer l'externalRef et organizationId
-    const meetSaaSData = await this.createUserOnMeetSaaS(dto.firstName.trim(), dto.lastName.trim(), email, user.id);
-
-    // Mettre à jour l'utilisateur avec l'externalRef et organizationId
-    if (meetSaaSData) {
-      if (dto.role === RegisterRole.PATIENT) {
-        await this.prisma.patient.update({
-          where: { id: user.id },
-          data: {
-            externalRef: meetSaaSData.externalRef,
-            organizationId: meetSaaSData.organizationId,
-          },
-        });
-      } else {
-        await this.prisma.doctor.update({
-          where: { id: user.id },
-          data: {
-            externalRef: meetSaaSData.externalRef,
-            organizationId: meetSaaSData.organizationId,
-          },
-        });
-      }
     }
 
     const challenge = await this.createChallenge(user, dto.role, 'EMAIL_VERIFICATION');
