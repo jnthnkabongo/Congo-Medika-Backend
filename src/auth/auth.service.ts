@@ -115,7 +115,7 @@ export class AuthService {
       await this.prisma.doctor.update({ where: { id: challenge.userId }, data: { emailVerifiedAt: now } });
     }
     await this.prisma.authCode.update({ where: { id: challenge.id }, data: { consumedAt: now } });
-    return { message: 'Adresse e-mail vérifiée. Vous pouvez maintenant vous connecter nnnnnnnnnnn.' };
+    return { message: 'Adresse e-mail vérifiée. Vous pouvez maintenant vous connecter à l\'application.' };
   }
 
   async resendVerification(dto: ResendVerificationDto) {

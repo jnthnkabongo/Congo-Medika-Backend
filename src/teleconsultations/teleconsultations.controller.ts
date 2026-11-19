@@ -8,13 +8,19 @@ export class TeleconsultationsController {
   constructor(private readonly teleconsultationsService: TeleconsultationsService) {}
 
   @Post()
-  async createTeleconsultation(@Body() data: { appointmentId: number; patientId: number; doctorId: number }) {
-    return this.teleconsultationsService.createTeleconsultation(data);
+  async createTeleconsultation(@Body() data: { appointmentId: number }, @Request() req) {
+    return this.teleconsultationsService.createTeleconsultation(
+      data.appointmentId,
+      req.user,
+    );
   }
 
   @Get('patient')
   async getPatientTeleconsultations(@Request() req) {
     const user = req.user;
+    console.log(
+      `[Teleconsultations] GET /patient - user.sub=${user.sub}, role=${user.role}`,
+    );
     return this.teleconsultationsService.getTeleconsultationsByPatient(parseInt(user.sub));
   }
 

@@ -151,6 +151,10 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
       (client.user.role === 'doctor' && teleconsultation.doctorId === userId);
 
     if (!hasAccess) {
+      console.log(
+        `sendMessage - Accès refusé: user=${client.user.email} (id=${userId}, role=${client.user.role}), ` +
+          `roomId=${data.roomId}, teleconsultation patientId=${teleconsultation.patientId}, doctorId=${teleconsultation.doctorId}`,
+      );
       client.emit('error', { message: 'Accès non autorisé' });
       return;
     }

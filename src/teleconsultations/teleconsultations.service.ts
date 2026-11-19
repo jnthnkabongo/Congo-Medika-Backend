@@ -6,14 +6,10 @@ import { v4 as uuidv4 } from 'uuid';
 export class TeleconsultationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async createTeleconsultation(data: {
-    appointmentId: number;
-    patientId: number;
-    doctorId: number;
-  }) {
+  async createTeleconsultation(appointmentId: number, user: any) {
     // Vérifier que l'appointment existe
     const appointment = await this.prisma.appointment.findUnique({
-      where: { id: BigInt(data.appointmentId) },
+      where: { id: BigInt(appointmentId) },
       include: {
         patient: true,
         doctor: true,
@@ -24,25 +20,61 @@ export class TeleconsultationsService {
       throw new NotFoundException('Rendez-vous non trouvé');
     }
 
+    // L'appelant doit être le patient ou le médecin du rendez-vous
+    const callerId = BigInt(user.sub);
+    const isParty =
+      appointment.patientId === callerId || appointment.doctorId === callerId;
+    if (!isParty) {
+      throw new ForbiddenException(
+        `Accès refusé : le rendez-vous ${appointmentId} n'appartient pas à l'utilisateur ${user.sub}`,
+      );
+    }
+
+    // Les ids viennent du rendez-vous (source de vérité), jamais du body
+    const patientId = appointment.patientId;
+    const doctorId = appointment.doctorId;
+
     // Vérifier si une téléconsultation existe déjà pour cet appointment
     const existingTeleconsultation = await this.prisma.teleconsultation.findUnique({
-      where: { appointmentId: BigInt(data.appointmentId) },
+      where: { appointmentId: BigInt(appointmentId) },
     });
 
     if (existingTeleconsultation) {
-      return existingTeleconsultation;
+      if (
+        existingTeleconsultation.patientId === patientId &&
+        existingTeleconsultation.doctorId === doctorId
+      ) {
+        console.log(
+          `[Teleconsultations] Téléconsultation existante retournée pour appointmentId=${appointmentId} (roomId=${existingTeleconsultation.roomId})`,
+        );
+        return existingTeleconsultation;
+      }
+      // Téléconsultation incohérente (ids ne correspondant pas au rendez-vous)
+      // → correction en place pour préserver roomId/messages
+      console.warn(
+        `[Teleconsultations] Téléconsultation ${existingTeleconsultation.id} incohérente ` +
+          `(patientId=${existingTeleconsultation.patientId}≠${patientId}, ` +
+          `doctorId=${existingTeleconsultation.doctorId}≠${doctorId}) — correction`,
+      );
+      return this.prisma.teleconsultation.update({
+        where: { id: existingTeleconsultation.id },
+        data: { patientId, doctorId },
+      });
     }
 
     // Générer un roomId unique
     const roomId = `room-${uuidv4()}`;
+    console.log(
+      `[Teleconsultations] Création - appointmentId=${appointmentId}, patientId=${patientId}, doctorId=${doctorId}, roomId=${roomId}`,
+    );
 
     // Créer la téléconsultation
     const teleconsultation = await this.prisma.teleconsultation.create({
       data: {
         uuid: uuidv4(),
-        appointmentId: BigInt(data.appointmentId),
-        patientId: BigInt(data.patientId),
-        doctorId: BigInt(data.doctorId),
+        appointmentId: BigInt(appointmentId),
+        patientId,
+        doctorId,
         roomId,
         status: 'waiting',
       },
@@ -82,6 +114,7 @@ export class TeleconsultationsService {
   }
 
   async getTeleconsultationsByPatient(patientId: number) {
+    console.log(`[Teleconsultations] Recherche pour patientId=${patientId}`);
     const teleconsultations = await this.prisma.teleconsultation.findMany({
       where: { patientId: BigInt(patientId) },
       include: {
@@ -98,7 +131,7 @@ export class TeleconsultationsService {
       },
     });
 
-    return teleconsultations.map((teleconsultation) => ({
+    const result = teleconsultations.map((teleconsultation) => ({
       id: teleconsultation.id.toString(),
       uuid: teleconsultation.uuid,
       appointmentId: teleconsultation.appointmentId.toString(),
@@ -133,6 +166,14 @@ export class TeleconsultationsService {
         status: teleconsultation.appointment.status,
       },
     }));
+
+    console.log(
+      `[Teleconsultations] ${result.length} téléconsultation(s) pour patientId=${patientId}` +
+        (result.length > 0
+          ? ` — doctorIds: ${result.map((t) => t.doctorId).join(', ')}`
+          : ''),
+    );
+    return result;
   }
 
   async getTeleconsultationsByDoctor(doctorId: number) {
