@@ -320,6 +320,7 @@ enum AuthCodeUserType {
 enum AuthCodePurpose {
   EMAIL_VERIFICATION
   LOGIN_2FA
+  PASSWORD_RESET
 
   @@map("auth_code_purpose")
 }

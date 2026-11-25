@@ -10,10 +10,12 @@ import { RegisterDto, RegisterRole } from './dto/register.dto/register.dto';
 import { LoginDto } from './dto/login.dto/login.dto';
 import { VerifyEmailDto, VerifyLoginCodeDto } from './dto/verify-email.dto/verify-email.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto/resend-verification.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto/reset-password.dto';
 import { ConfigService } from '@nestjs/config';
 
 type Role = 'patient' | 'doctor';
-type Purpose = 'EMAIL_VERIFICATION' | 'LOGIN_2FA';
+type Purpose = 'EMAIL_VERIFICATION' | 'LOGIN_2FA' | 'PASSWORD_RESET';
 
 @Injectable()
 export class AuthService {
@@ -59,7 +61,11 @@ export class AuthService {
     try {
       await this.emailService.sendEmail({
         to: user.email,
-        subject: purpose === 'EMAIL_VERIFICATION' ? 'Vérification de votre adresse e-mail' : 'Code de connexion sécurisé',
+        subject: purpose === 'EMAIL_VERIFICATION'
+          ? 'Vérification de votre adresse e-mail'
+          : purpose === 'PASSWORD_RESET'
+            ? 'Réinitialisation de votre mot de passe'
+            : 'Code de connexion sécurisé',
         htmlContent: `<p>Votre code de sécurité est :</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p><p>Il expire dans 5 minutes et ne peut être utilisé qu'une seule fois.</p>`,
       });
     } catch (error) {
@@ -200,6 +206,73 @@ export class AuthService {
     //   `,
     // });
     return { role, ...(await this.createChallenge(user, role, 'LOGIN_2FA')) };
+  }
+
+  /// Demande de réinitialisation : envoie un code à 6 chiffres par email.
+  /// Réponse générique dans tous les cas pour ne pas révéler si le
+  /// compte existe.
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const email = dto.email.trim().toLowerCase();
+    const patient = await this.prisma.patient.findUnique({ where: { email } });
+    const doctor = patient ? null : await this.prisma.doctor.findUnique({ where: { email } });
+    const user = patient ?? doctor;
+    const role: Role | null = patient ? 'patient' : doctor ? 'doctor' : null;
+
+    if (user && role) {
+      try {
+        await this.createChallenge(user, role, 'PASSWORD_RESET');
+      } catch (error) {
+        // 429 (code récent) : on renvoie quand même la réponse générique
+        // pour ne pas faciliter l'énumération des comptes.
+        if (!(error instanceof HttpException && error.getStatus() === HttpStatus.TOO_MANY_REQUESTS)) {
+          throw error;
+        }
+      }
+    }
+    return {
+      message: 'Si un compte existe avec cette adresse e-mail, un code de réinitialisation a été envoyé.',
+    };
+  }
+
+  /// Réinitialisation : vérifie le code puis remplace le mot de passe.
+  /// Le code est retrouvé via l'email (pas de challengeId exposé au
+  /// client, ce qui évite l'énumération des comptes).
+  async resetPassword(dto: ResetPasswordDto) {
+    if (dto.password.length < 6) {
+      throw new BadRequestException('Le mot de passe doit contenir au moins 6 caractères.');
+    }
+    const email = dto.email.trim().toLowerCase();
+    const pending = await this.prisma.authCode.findFirst({
+      where: {
+        email,
+        purpose: 'PASSWORD_RESET',
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!pending) {
+      throw new UnauthorizedException('Code invalide ou expiré. Demandez un nouveau code.');
+    }
+    const challenge = await this.checkCode(pending.challengeId, dto.code, 'PASSWORD_RESET');
+    const hashed = await argon2.hash(dto.password);
+
+    if (challenge.userType === 'patient') {
+      await this.prisma.patient.update({
+        where: { id: challenge.userId },
+        data: { password: hashed },
+      });
+    } else {
+      await this.prisma.doctor.update({
+        where: { id: challenge.userId },
+        data: { password: hashed },
+      });
+    }
+    await this.prisma.authCode.update({
+      where: { id: challenge.id },
+      data: { consumedAt: new Date() },
+    });
+    return { message: 'Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter.' };
   }
 
   async verifyLoginCode(dto: VerifyLoginCodeDto) {
